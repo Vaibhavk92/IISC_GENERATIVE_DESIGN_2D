@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.env
+.venv
+venv/
+
+# Generated output images
+silhouette.png
+contour_debug.png
+output_layout.png
+score_curve.png
+
+# Model weights / diffusers cache
+*.safetensors
+*.bin
+*.ckpt
+models/

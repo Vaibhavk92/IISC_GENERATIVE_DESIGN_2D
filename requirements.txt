@@ -1,0 +1,12 @@
+# Core geometry & image processing
+shapely>=2.0.0
+numpy>=1.24.0
+opencv-python>=4.8.0
+scipy>=1.11.0
+matplotlib>=3.7.0
+
+# Optional: AI silhouette generation (requires GPU recommended)
+# diffusers>=0.21.0
+# torch>=2.0.0
+# transformers>=4.30.0
+# accelerate>=0.21.0
