@@ -1,10 +1,14 @@
 """
 phase1_vision.py — Phase 1: Silhouette Generation & Contour Extraction
 
-Two-step:
-  1. SilhouetteGenerator  – text prompt -> binary (B/W) image
+Three components:
+  1. SilhouetteGenerator      – text prompt -> binary (B/W) image
      Attempts SDXL via diffusers; falls back to a synthetic dog polygon.
-  2. ContourExtractor     – binary image -> simplified Shapely Polygon
+  2. ImageSilhouetteExtractor – image + prompt -> transparent PNG + binary mask
+     Removes background (rembg first, GrabCut fallback), preserves internal
+     holes (windows, arches, wheel centres).  Saves a clean RGBA silhouette PNG
+     and returns the binary mask used by ContourExtractor.
+  3. ContourExtractor         – binary image -> simplified Shapely Polygon
      Uses cv2.findContours + Douglas-Peucker (cv2.approxPolyDP).
 """
 
@@ -28,12 +32,10 @@ logger = logging.getLogger(__name__)
 
 class SilhouetteGenerator:
     """
-    Produces a binary silhouette image (uint8, HxW) for a text prompt.
+    Produces a binary silhouette image (uint8, HxW) for a text prompt via SDXL.
 
-    When use_diffusion=True, it attempts to load SDXL from HuggingFace and
-    generate a pure black silhouette on white background via a carefully
-    crafted prompt + negative prompt.  Falls back to a hand-crafted synthetic
-    dog silhouette if the library is unavailable or any error occurs.
+    Raises RuntimeError if the diffusers pipeline cannot be loaded — in that
+    case use ImageSilhouetteExtractor with an input image instead.
     """
 
     SILHOUETTE_POSITIVE = (
@@ -48,12 +50,10 @@ class SilhouetteGenerator:
 
     def __init__(
         self,
-        use_diffusion: bool = True,
         output_size: Tuple[int, int] = (512, 512),
         num_inference_steps: int = 30,
         guidance_scale: float = 9.0,
     ):
-        self.use_diffusion = use_diffusion
         self.output_size = output_size
         self.num_inference_steps = num_inference_steps
         self.guidance_scale = guidance_scale
@@ -65,14 +65,8 @@ class SilhouetteGenerator:
         Generate and return a binary silhouette image (0=foreground, 255=background).
         Optionally saves it to `output_path`.
         """
-        if self.use_diffusion:
-            self._ensure_pipeline()
-
-        img = (
-            self._from_diffusion(prompt)
-            if self.use_diffusion
-            else self._synthetic_dispatch(prompt)
-        )
+        self._ensure_pipeline()
+        img = self._from_diffusion(prompt)
 
         if output_path:
             cv2.imwrite(output_path, img)
@@ -101,8 +95,11 @@ class SilhouetteGenerator:
 
             logger.info("SDXL ready.")
         except Exception as exc:
-            logger.warning("SDXL unavailable (%s). Using synthetic fallback.", exc)
-            self.use_diffusion = False
+            raise RuntimeError(
+                f"SDXL pipeline failed to load: {exc}. "
+                "Install diffusers + torch, or use ImageSilhouetteExtractor "
+                "with an input image (set INPUT_IMAGE in main.py)."
+            ) from exc
 
     def _from_diffusion(self, prompt: str) -> np.ndarray:
         w, h = self.output_size
@@ -119,134 +116,331 @@ class SilhouetteGenerator:
         pil_img = result.images[0].convert("L")   # grayscale
         gray = np.array(pil_img, dtype=np.uint8)
 
-        # Otsu threshold -> binary: dark ink = foreground (255), white bg = 0
         _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         return binary
 
-    # ------------------------------------------------------------------
-    def _synthetic_dispatch(self, prompt: str) -> np.ndarray:
-        """Route to the correct synthetic generator based on prompt keyword."""
-        p = prompt.lower()
-        if "house" in p or "home" in p or "building" in p:
-            return self._synthetic_house()
-        return self._synthetic_dog()
+
+# ---------------------------------------------------------------------------
+# Step 2 — Image-based silhouette extraction
+# ---------------------------------------------------------------------------
+
+class ImageSilhouetteExtractor:
+    """
+    Extracts a clean silhouette from an existing photograph or illustration.
+
+    Workflow
+    --------
+    1. Load + resize the input image.
+    2. Remove background — tries ``rembg`` first (high quality, no GPU needed),
+       falls back to OpenCV GrabCut when rembg is not installed.
+    3. Preserve internal holes (windows, arches, wheel centres …) by detecting
+       enclosed transparent regions inside the object and keeping them as holes.
+    4. Save an RGBA PNG:  object = solid black (alpha=255),
+                          background + holes = fully transparent (alpha=0).
+    5. Return a binary uint8 mask (0=foreground, 255=background) compatible with
+       ``ContourExtractor`` and the rest of the pipeline.
+
+    Parameters
+    ----------
+    output_size : (width, height) — target resolution for resize.
+    min_hole_area : minimum pixel area for a region to be kept as an internal hole
+                    rather than filled in as noise.
+    """
+
+    def __init__(
+        self,
+        output_size: Tuple[int, int] = (512, 512),
+        min_hole_area: int = 200,
+    ):
+        self.output_size = output_size
+        self.min_hole_area = min_hole_area
 
     # ------------------------------------------------------------------
-    def _synthetic_house(self) -> np.ndarray:
+    def extract_from_image(
+        self,
+        image_path: str,
+        prompt: str = "",
+        output_path: Optional[str] = None,
+    ) -> np.ndarray:
         """
-        Hand-crafted front-view house silhouette using OpenCV drawing primitives.
-        Shape: rectangular body + triangular roof + chimney + door arch.
-        All measurements are fractions of (w, h).
+        Segment the main object from *image_path* and return a pipeline-
+        compatible binary mask (0 = foreground, 255 = background/holes).
+
+        Optionally saves a transparent RGBA silhouette PNG to *output_path*.
+
+        Parameters
+        ----------
+        image_path : str   Path to the input image (JPEG, PNG, WebP, AVIF, HEIC, …).
+        prompt     : str   Text hint describing the target object (logged; used
+                           by future prompt-guided backends).
+        output_path: str   If given, writes the transparent PNG here.
+
+        Returns
+        -------
+        binary_mask : np.ndarray (uint8, H×W) — 0 = silhouette, 255 = bg/holes
         """
-        w, h = self.output_size
-        img = np.full((h, w), 255, dtype=np.uint8)   # white background
+        if prompt:
+            logger.info("ImageSilhouetteExtractor: prompt='%s'", prompt)
 
-        def ip(fx, fy):
-            return (int(fx * w), int(fy * h))
+        img_bgr = self._load_image(image_path)
+        img_bgr = cv2.resize(img_bgr, self.output_size, interpolation=cv2.INTER_AREA)
+        logger.info("Input image resized to %s", self.output_size)
 
-        def ia(fx, fy):
-            return (int(fx * w), int(fy * h))
+        # ── 1. Background removal → alpha mask (255=fg, 0=bg) ────────
+        alpha = self._remove_background(img_bgr, prompt=prompt)
 
-        # ── Main body (tall rectangle) ────────────────────────────────
-        body_tl = ip(0.15, 0.45)
-        body_br = ip(0.85, 0.92)
-        cv2.rectangle(img, body_tl, body_br, 0, -1)
+        # ── 2. Preserve internal holes ────────────────────────────────
+        alpha = self._preserve_holes(alpha)
 
-        # ── Roof (isoceles triangle sitting on top of body) ───────────
-        roof = np.array([
-            ip(0.08, 0.46),    # left eave
-            ip(0.92, 0.46),    # right eave
-            ip(0.50, 0.08),    # apex
-        ], dtype=np.int32)
-        cv2.fillPoly(img, [roof], 0)
+        # ── 3. Post-process: remove isolated noise ────────────────────
+        alpha = self._clean_mask(alpha)
 
-        # ── Chimney (rectangle rising from left side of roof) ─────────
-        chimney = np.array([
-            ip(0.28, 0.08),
-            ip(0.38, 0.08),
-            ip(0.38, 0.32),
-            ip(0.28, 0.32),
-        ], dtype=np.int32)
-        cv2.fillPoly(img, [chimney], 0)
+        # ── 4. Save transparent PNG ───────────────────────────────────
+        if output_path:
+            self._save_transparent_png(alpha, output_path)
 
-        # ── Door (rounded arch: rectangle + semicircle top) ──────────
-        door_tl = ip(0.42, 0.68)
-        door_br = ip(0.58, 0.92)
-        cv2.rectangle(img, door_tl, door_br, 255, -1)   # cut door OUT (white)
-
-        door_cx = int(0.50 * w)
-        door_cy = int(0.68 * h)
-        door_rx = int(0.08 * w)
-        cv2.ellipse(img, (door_cx, door_cy), (door_rx, door_rx),
-                    0, 180, 360, 255, -1)                # arch top (white)
-
-        # ── Left window (square) ──────────────────────────────────────
-        cv2.rectangle(img, ip(0.20, 0.55), ip(0.37, 0.73), 255, -1)
-
-        # ── Right window (square) ─────────────────────────────────────
-        cv2.rectangle(img, ip(0.63, 0.55), ip(0.80, 0.73), 255, -1)
-
-        return img   # 0 = house (black), 255 = background/openings (white)
+        # ── 5. Convert to pipeline convention (0=fg, 255=bg) ─────────
+        binary_mask = cv2.bitwise_not(alpha)
+        return binary_mask
 
     # ------------------------------------------------------------------
-    def _synthetic_dog(self) -> np.ndarray:
+    @staticmethod
+    def _load_image(image_path: str) -> np.ndarray:
         """
-        Hand-crafted side-view dog silhouette using OpenCV drawing primitives.
-        Coordinate system: image origin at top-left.
-        All measurements are fractions of (w, h).
+        Load any image format into a BGR uint8 numpy array.
+
+        cv2.imread handles JPEG/PNG/BMP/TIFF/WebP out of the box.
+        For formats it can't decode (AVIF, HEIC, JXL, …) we fall back
+        to Pillow, which supports them when the relevant codec is installed
+        (e.g. ``pillow-avif-plugin`` or Pillow >= 10 built with libaom).
         """
-        w, h = self.output_size
-        # Start with white background
-        img = np.full((h, w), 255, dtype=np.uint8)
+        img_bgr = cv2.imread(image_path)
+        if img_bgr is not None:
+            return img_bgr
 
-        def ip(fx, fy):   # fractional -> integer pixel
-            return (int(fx * w), int(fy * h))
+        # cv2 failed — try Pillow as a format-agnostic fallback
+        try:
+            from PIL import Image as PILImage
+            pil_img = PILImage.open(image_path).convert("RGB")
+            img_rgb = np.array(pil_img, dtype=np.uint8)
+            return cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+        except Exception as pil_exc:
+            raise FileNotFoundError(
+                f"Could not load image '{image_path}'. "
+                f"cv2.imread returned None; Pillow also failed: {pil_exc}"
+            ) from pil_exc
 
-        def ia(fx, fy):   # fractional axes
-            return (int(fx * w), int(fy * h))
+    # ------------------------------------------------------------------
+    def _remove_background(self, img_bgr: np.ndarray, prompt: str = "") -> np.ndarray:
+        """Return alpha mask: 255=foreground object, 0=background.
 
-        # ── Torso (wide ellipse) ──────────────────────────────────────
-        cv2.ellipse(img, ip(0.48, 0.54), ia(0.27, 0.17), 0, 0, 360, 0, -1)
+        Uses OWL-ViT to locate the object from the prompt, then runs GrabCut
+        initialised on that tight bbox.  Falls back to a centre-crop rect if
+        OWL-ViT is unavailable or scores too low.
+        """
+        bbox = self._detect_bbox(img_bgr, prompt) if prompt else None
+        return self._grabcut(img_bgr, bbox=bbox)
+ 
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _detect_bbox(
+        img_bgr: np.ndarray,
+        prompt: str,
+    ) -> Optional[Tuple[int, int, int, int]]:
+        """
+        Use OWL-ViT zero-shot object detection to find the bounding box of the
+        object described by *prompt*.
 
-        # ── Neck (filled quad connecting body to head) ────────────────
-        neck = np.array([ip(0.68, 0.41), ip(0.76, 0.33),
-                         ip(0.80, 0.46), ip(0.72, 0.50)], dtype=np.int32)
-        cv2.fillPoly(img, [neck], 0)
+        Returns (x1, y1, x2, y2) in pixel coordinates, or None if the model is
+        unavailable or no detection exceeds the confidence threshold.
 
-        # ── Head (circle) ─────────────────────────────────────────────
-        cv2.circle(img, ip(0.78, 0.37), int(0.12 * w), 0, -1)
+        Optional dependency: ``pip install transformers torch``
+        """
+        try:
+            from transformers import pipeline as hf_pipeline
+            from PIL import Image as PILImage
 
-        # ── Snout (ellipse protruding right) ─────────────────────────
-        cv2.ellipse(img, ip(0.91, 0.42), ia(0.055, 0.040), 0, 0, 360, 0, -1)
+            img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+            pil_img = PILImage.fromarray(img_rgb)
 
-        # ── Ear (triangular flap) ─────────────────────────────────────
-        ear = np.array([ip(0.76, 0.26), ip(0.86, 0.21),
-                        ip(0.84, 0.35)], dtype=np.int32)
-        cv2.fillPoly(img, [ear], 0)
+            detector = hf_pipeline(
+                "zero-shot-object-detection",
+                model="google/owlvit-base-patch32",
+            )
+            results = detector(pil_img, candidate_labels=[prompt])
 
-        # ── Tail (thin ellipse, tilted up at rear) ────────────────────
-        cv2.ellipse(img, ip(0.19, 0.37), ia(0.035, 0.15), -25, 0, 360, 0, -1)
+            if not results:
+                logger.info("OWL-ViT: no detections for prompt '%s'.", prompt)
+                return None
 
-        # ── Four legs (rectangles) ────────────────────────────────────
-        lw = int(0.055 * w)
-        for lx_f in (0.37, 0.45):   # hind legs
-            lx = int(lx_f * w)
-            cv2.rectangle(img, (lx - lw // 2, int(0.65 * h)),
-                          (lx + lw // 2, int(0.87 * h)), 0, -1)
-        for lx_f in (0.61, 0.70):   # front legs
-            lx = int(lx_f * w)
-            cv2.rectangle(img, (lx - lw // 2, int(0.65 * h)),
-                          (lx + lw // 2, int(0.87 * h)), 0, -1)
+            best = max(results, key=lambda r: r["score"])
+            logger.info(
+                "OWL-ViT detected '%s' (score=%.3f): %s",
+                prompt, best["score"], best["box"],
+            )
 
-        # ── Paws (small rounded caps) ─────────────────────────────────
-        for lx_f in (0.37, 0.45, 0.61, 0.70):
-            cv2.ellipse(img, ip(lx_f, 0.87), ia(0.035, 0.025), 0, 0, 360, 0, -1)
+            if best["score"] < 0.05:
+                logger.info("OWL-ViT score too low — ignoring detection.")
+                return None
 
-        return img  # 0 = dog (black), 255 = background (white)
+            b = best["box"]
+            return (int(b["xmin"]), int(b["ymin"]), int(b["xmax"]), int(b["ymax"]))
+
+        except ImportError:
+            logger.info("transformers not installed — skipping OWL-ViT detection.")
+            return None
+        except Exception as exc:
+            logger.warning("OWL-ViT detection failed (%s) — skipping.", exc)
+            return None
+
+    # ------------------------------------------------------------------
+    def _rembg(self, img_bgr: np.ndarray) -> Optional[np.ndarray]:
+        """Use rembg for high-quality background removal. Returns None on failure."""
+        try:
+            from rembg import remove
+            from PIL import Image as PILImage
+
+            img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+            pil_in = PILImage.fromarray(img_rgb)
+            pil_out = remove(pil_in)
+
+            result = np.array(pil_out.convert("RGBA"), dtype=np.uint8)
+            alpha_channel = result[:, :, 3]
+
+            _, binary_alpha = cv2.threshold(alpha_channel, 127, 255, cv2.THRESH_BINARY)
+            logger.info("rembg background removal succeeded.")
+            return binary_alpha
+        except ImportError:
+            logger.info("rembg not installed — will use GrabCut fallback.")
+            return None
+        except Exception as exc:
+            logger.warning("rembg failed (%s) — falling back to GrabCut.", exc)
+            return None
+
+    # ------------------------------------------------------------------
+    def _grabcut(
+        self,
+        img_bgr: np.ndarray,
+        bbox: Optional[Tuple[int, int, int, int]] = None,
+    ) -> np.ndarray:
+        """
+        GrabCut segmentation.
+
+        If *bbox* (x1, y1, x2, y2) is provided (from OWL-ViT), it is used
+        directly as the initialisation rectangle.  Otherwise falls back to a
+        fixed 8%-margin centred rect.
+        """
+        h, w = img_bgr.shape[:2]
+        mask = np.zeros((h, w), dtype=np.uint8)
+
+        if bbox is not None:
+            x1, y1, x2, y2 = bbox
+            # Small inward pad so the rect doesn't clip the object boundary
+            pad_x = max(int(0.02 * w), 2)
+            pad_y = max(int(0.02 * h), 2)
+            x1 = max(0, x1 - pad_x)
+            y1 = max(0, y1 - pad_y)
+            x2 = min(w, x2 + pad_x)
+            y2 = min(h, y2 + pad_y)
+            rect = (x1, y1, x2 - x1, y2 - y1)
+            logger.info("GrabCut init rect from OWL-ViT bbox: %s", rect)
+        else:
+            margin_x = max(int(0.08 * w), 5)
+            margin_y = max(int(0.08 * h), 5)
+            rect = (margin_x, margin_y, w - 2 * margin_x, h - 2 * margin_y)
+            logger.info("GrabCut init rect from centre-crop fallback: %s", rect)
+
+        bgd_model = np.zeros((1, 65), dtype=np.float64)
+        fgd_model = np.zeros((1, 65), dtype=np.float64)
+        cv2.grabCut(img_bgr, mask, rect, bgd_model, fgd_model, 8,
+                    cv2.GC_INIT_WITH_RECT)
+
+        fg_mask = np.where(
+            (mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD), 255, 0
+        ).astype(np.uint8)
+
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, k)
+        logger.info("GrabCut background removal succeeded.")
+        return fg_mask
+
+    # ------------------------------------------------------------------
+    def _preserve_holes(self, alpha: np.ndarray) -> np.ndarray:
+        """
+        Detect enclosed transparent regions inside the object (holes) and keep
+        them transparent.  Regions touching the image border are background and
+        must stay transparent; enclosed pockets that were incorrectly filled by
+        a closing step are restored here.
+
+        Uses connected-components on the *inverted* mask to separate background
+        (border-connected components) from interior holes.
+        """
+        inv = cv2.bitwise_not(alpha)   # 255 = transparent areas (bg + potential holes)
+
+        # Label all transparent blobs
+        n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+            inv, connectivity=8
+        )
+
+        h, w = alpha.shape
+        border_labels: set = set()
+
+        # Any blob touching the image border belongs to the background
+        for row in (0, h - 1):
+            for c in range(w):
+                border_labels.add(int(labels[row, c]))
+        for col in (0, w - 1):
+            for r in range(h):
+                border_labels.add(int(labels[r, col]))
+
+        # Interior blobs not touching border are genuine holes — keep transparent
+        result = alpha.copy()
+        for lbl in range(1, n_labels):
+            if lbl in border_labels:
+                continue
+            area = int(stats[lbl, cv2.CC_STAT_AREA])
+            if area >= self.min_hole_area:
+                result[labels == lbl] = 0   # restore as transparent (hole)
+            # Small blobs below min_hole_area are noise — leave as opaque (filled)
+        return result
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _clean_mask(alpha: np.ndarray) -> np.ndarray:
+        """Remove small isolated foreground noise islands."""
+        n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+            alpha, connectivity=8
+        )
+        if n_labels <= 1:
+            return alpha
+
+        # Keep only the largest foreground blob (the main object)
+        areas = stats[1:, cv2.CC_STAT_AREA]
+        largest_lbl = int(np.argmax(areas)) + 1
+
+        clean = np.zeros_like(alpha)
+        clean[labels == largest_lbl] = 255
+        return clean
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _save_transparent_png(alpha: np.ndarray, output_path: str) -> None:
+        """
+        Write a solid-black silhouette with transparent background as RGBA PNG.
+        Object pixels: (0, 0, 0, 255).  Background / hole pixels: (0, 0, 0, 0).
+        """
+        from PIL import Image as PILImage
+
+        h, w = alpha.shape
+        rgba = np.zeros((h, w, 4), dtype=np.uint8)
+        rgba[:, :, 3] = alpha          # alpha channel only; RGB stay 0 (black)
+
+        PILImage.fromarray(rgba, mode="RGBA").save(output_path)
+        logger.info("Transparent silhouette PNG saved -> %s", output_path)
 
 
 # ---------------------------------------------------------------------------
-# Step 2 — Contour extraction & simplification
+# Step 3 — Contour extraction & simplification
 # ---------------------------------------------------------------------------
 
 class ContourExtractor:

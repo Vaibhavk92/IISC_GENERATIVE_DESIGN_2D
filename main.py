@@ -19,7 +19,7 @@ from shapely.geometry import Polygon
 
 from geometry_utils import normalize_polygon
 from models import EnvironmentBounds, FitnessResult, InventoryPiece
-from phase1_vision import ContourExtractor, SilhouetteGenerator
+from phase1_vision import ContourExtractor, ImageSilhouetteExtractor, SilhouetteGenerator
 from phase2_multiscale import MultiScaleOptimizer
 from phase4_fitness import BestLayoutSelector, FitnessEvaluator
 
@@ -193,6 +193,94 @@ def visualize(best: FitnessResult, out_path: str = "output_layout.png") -> None:
         logger.warning("Visualisation failed: %s", exc)
 
 
+def visualize_all(
+    results: List[FitnessResult],
+    best: FitnessResult,
+    out_path: str = "all_scales_layout.png",
+) -> None:
+    """Render all scale layouts in a grid so every scale is visible at once."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import matplotlib.cm as cm
+        from matplotlib.patches import PathPatch
+        from matplotlib.path import Path as MPath
+
+        def _poly_patch(poly, **kw):
+            coords = list(poly.exterior.coords)
+            codes = [MPath.MOVETO] + [MPath.LINETO] * (len(coords) - 2) + [MPath.CLOSEPOLY]
+            return PathPatch(MPath(coords, codes), **kw)
+
+        n = len(results)
+        cols = 3
+        rows = (n + cols - 1) // cols
+        fig, axes = plt.subplots(rows, cols, figsize=(cols * 6, rows * 5))
+        axes_flat = np.array(axes).flatten()
+
+        sorted_results = sorted(results, key=lambda r: r.scale_factor)
+
+        for idx, result in enumerate(sorted_results):
+            ax = axes_flat[idx]
+            ax.set_aspect("equal")
+            ax.set_facecolor("#f5f5f0")
+            layout = result.layout
+            is_best = abs(result.scale_factor - best.scale_factor) < 1e-6
+
+            if layout.target_polygon and not layout.target_polygon.is_empty:
+                edge_color = "#cc2222" if is_best else "#2266cc"
+                lw = 2.5 if is_best else 1.5
+                ax.add_patch(_poly_patch(layout.target_polygon,
+                                         facecolor="#ddeeff", edgecolor=edge_color,
+                                         linewidth=lw, zorder=1))
+
+            colors = cm.Set2(np.linspace(0, 1, max(len(layout.placed_pieces), 1)))
+            for i, pp in enumerate(layout.placed_pieces):
+                if pp.intersection_with_target and not pp.intersection_with_target.is_empty:
+                    ax.add_patch(_poly_patch(pp.intersection_with_target,
+                                             facecolor=(*colors[i][:3], 0.75),
+                                             edgecolor="k", linewidth=0.5, zorder=2))
+                    cx, cy = pp.intersection_with_target.centroid.coords[0]
+                    ax.text(cx, cy, pp.piece.piece_id.replace("_", "\n"),
+                            ha="center", va="center", fontsize=5, zorder=6,
+                            color="#222222")
+
+            if layout.remaining_target and not layout.remaining_target.is_empty:
+                if hasattr(layout.remaining_target, "exterior"):
+                    ax.add_patch(_poly_patch(layout.remaining_target,
+                                             facecolor=(1, 0.65, 0, 0.35),
+                                             edgecolor=(0.8, 0.4, 0), linewidth=0.8,
+                                             hatch="////", zorder=3))
+
+            cov = layout.coverage_ratio * 100
+            star = " ★ BEST" if is_best else ""
+            ax.set_title(
+                f"Scale {result.scale_factor:.0%}{star}\n"
+                f"Score {result.score:.4f} | Coverage {cov:.1f}% | "
+                f"Cuts {layout.total_cuts}",
+                fontsize=8,
+                color="#cc2222" if is_best else "black",
+                fontweight="bold" if is_best else "normal",
+            )
+            ax.autoscale_view()
+            ax.margins(0.05)
+
+        # Hide unused subplots
+        for idx in range(len(sorted_results), len(axes_flat)):
+            axes_flat[idx].set_visible(False)
+
+        fig.suptitle("All Scale Layouts", fontsize=13, fontweight="bold", y=1.01)
+        plt.tight_layout()
+        plt.savefig(out_path, dpi=150, bbox_inches="tight")
+        plt.close()
+        logger.info("All-scales layout saved -> %s", out_path)
+
+    except ImportError:
+        logger.warning("matplotlib not available — skipping visualisation.")
+    except Exception as exc:
+        logger.warning("visualize_all failed: %s", exc)
+
+
 def plot_score_curve(selector: BestLayoutSelector, out_path: str = "score_curve.png") -> None:
     """Line plot of score vs scale factor across all iterations."""
     try:
@@ -229,20 +317,22 @@ def plot_score_curve(selector: BestLayoutSelector, out_path: str = "score_curve.
 # ---------------------------------------------------------------------------
 
 def main() -> FitnessResult | None:
-    logger.info("=" * 65)
-    logger.info("  GENERATIVE DESIGN 2D PIPELINE  (prompt: 'a dog')")
-    logger.info("=" * 65)
-
     # ── Configuration ────────────────────────────────────────────────
-    PROMPT = "a dog"
+    # Set INPUT_IMAGE to use an existing photo/illustration as the source.
+    # Set PROMPT (and leave INPUT_IMAGE=None) to generate via SDXL instead.
+    INPUT_IMAGE: str | None = r"C:\Users\dhara\OneDrive\Desktop\GENERATIVE_DESIGN_2D\test_house_image.avif"
+    PROMPT: str = "house"
     BOUNDS = EnvironmentBounds(width=600, height=500)
-    USE_DIFFUSION = False   # set True when diffusers + GPU are available
+
+    logger.info("=" * 65)
+    logger.info("  GENERATIVE DESIGN 2D PIPELINE  (prompt: '%s')", PROMPT)
+    logger.info("=" * 65)
 
     FITNESS_WEIGHTS = (
-        0.08,   # w1 — cuts        (minimal: very few pieces so few cuts anyway)
-        0.04,   # w2 — cut length  (minimal: short cuts expected)
-        0.80,   # w3 — uncovered   (DOMINANT: coverage is the primary objective)
-        0.08,   # w4 — waste       (minimal: small margin pieces generate little waste)
+        0.0,    # w1 — cuts
+        0.0,    # w2 — cut length
+        1.0,    # w3 — uncovered
+        0.0,    # w4 — waste
     )
     # WHY w3=0.80 makes 90% the winner:
     #   coverage gap between 90% (74%) and 100% (59%) = 15 pts
@@ -251,7 +341,7 @@ def main() -> FitnessResult | None:
     SCALE_STEP = 0.10   # use 0.05 for production runs (slower but finer)
 
     LAYOUT_KWARGS = {
-        "n_structural_zones": 8,
+        "n_structural_zones": 6,
         # Orthogonal rotations only: prevents body_slab from tilting into a
         # diamond that inflates coverage by reaching into the roof area at the
         # cost of waste.  At 0 deg the 315x211 slab exactly matches the 90%-
@@ -263,8 +353,19 @@ def main() -> FitnessResult | None:
     # ── Phase 1: Silhouette & Contour ────────────────────────────────
     logger.info("\n[Phase 1] Silhouette generation + contour extraction")
 
-    gen = SilhouetteGenerator(use_diffusion=USE_DIFFUSION, output_size=(512, 512))
-    silhouette = gen.generate(prompt=PROMPT, output_path="silhouette.png")
+    if INPUT_IMAGE:
+        logger.info("  Mode: image-based extraction  (source: %s)", INPUT_IMAGE)
+        extractor_img = ImageSilhouetteExtractor(output_size=(512, 512))
+        silhouette = extractor_img.extract_from_image(
+            image_path=INPUT_IMAGE,
+            prompt=PROMPT,
+            output_path="silhouette.png",
+        )
+    else:
+        logger.info("  Mode: text-to-silhouette  (prompt: '%s')", PROMPT)
+        gen = SilhouetteGenerator(output_size=(512, 512))
+        silhouette = gen.generate(prompt=PROMPT, output_path="silhouette.png")
+
     logger.info("  Image shape: %s", silhouette.shape)
 
     extractor = ContourExtractor(epsilon_factor=0.008, min_area_ratio=0.015)
@@ -324,10 +425,11 @@ def main() -> FitnessResult | None:
 
     # ── Outputs ──────────────────────────────────────────────────────
     visualize(best, out_path="output_layout.png")
+    visualize_all(optimizer.all_results, best, out_path="all_scales_layout.png")
     plot_score_curve(selector, out_path="score_curve.png")
 
     logger.info("\nDone.  Output files: silhouette.png, contour_debug.png, "
-                "output_layout.png, score_curve.png")
+                "output_layout.png, all_scales_layout.png, score_curve.png")
     return best
 
 

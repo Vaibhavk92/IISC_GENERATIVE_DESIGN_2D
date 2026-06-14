@@ -54,7 +54,7 @@ class FitnessEvaluator:
 
     def __init__(
         self,
-        weights: Tuple[float, float, float, float] = (0.08, 0.04, 0.80, 0.08),
+        weights: Tuple[float, float, float, float] = (0.01, 0.01, 0.96, 0.02),
     ):
         self.w1, self.w2, self.w3, self.w4 = weights
 
