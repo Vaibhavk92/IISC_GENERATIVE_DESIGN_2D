@@ -1,0 +1,263 @@
+{
+    "marker_width_cm": 4.7,
+    "cm_per_pixel": 0.01843137254901961,
+    "total_scraps": 4,
+    "scraps": [
+        {
+            "id": 1,
+            "shape_type": "irregular",
+            "vertices_count": 6,
+            "vertex_labels": {
+                "A": [
+                    847,
+                    1130
+                ],
+                "B": [
+                    782,
+                    1199
+                ],
+                "C": [
+                    826,
+                    1280
+                ],
+                "D": [
+                    810,
+                    1323
+                ],
+                "E": [
+                    981,
+                    1327
+                ],
+                "F": [
+                    977,
+                    1136
+                ]
+            },
+            "side_lengths_cm": {
+                "AB": 1.75,
+                "BC": 1.7,
+                "CD": 0.85,
+                "DE": 3.15,
+                "EF": 3.52,
+                "FA": 2.4
+            },
+            "angles_deg": {
+                "A": 130.65,
+                "B": 108.2,
+                "C": 131.08,
+                "D": 70.93,
+                "E": 87.46,
+                "F": 93.84
+            },
+            "area_cm2": 11.08,
+            "perimeter_cm": 13.75,
+            "bbox_width_cm": 3.7,
+            "bbox_height_cm": 3.65,
+            "centroid_x": 894,
+            "centroid_y": 1228,
+            "contour_points": [
+                [
+                    847,
+                    1130
+                ],
+                [
+                    782,
+                    1199
+                ],
+                [
+                    826,
+                    1280
+                ],
+                [
+                    810,
+                    1323
+                ],
+                [
+                    981,
+                    1327
+                ],
+                [
+                    977,
+                    1136
+                ]
+            ]
+        },
+        {
+            "id": 2,
+            "shape_type": "irregular",
+            "vertices_count": 5,
+            "vertex_labels": {
+                "A": [
+                    175,
+                    1031
+                ],
+                "B": [
+                    156,
+                    1367
+                ],
+                "C": [
+                    380,
+                    1370
+                ],
+                "D": [
+                    388,
+                    1116
+                ],
+                "E": [
+                    259,
+                    1159
+                ]
+            },
+            "side_lengths_cm": {
+                "AB": 6.2,
+                "BC": 4.13,
+                "CD": 4.68,
+                "DE": 2.51,
+                "EA": 2.82
+            },
+            "angles_deg": {
+                "A": 36.51,
+                "B": 87.53,
+                "C": 91.04,
+                "D": 69.76,
+                "E": 104.84
+            },
+            "area_cm2": 19.0,
+            "perimeter_cm": 21.04,
+            "bbox_width_cm": 4.33,
+            "bbox_height_cm": 6.27,
+            "centroid_x": 269,
+            "centroid_y": 1241,
+            "contour_points": [
+                [
+                    175,
+                    1031
+                ],
+                [
+                    156,
+                    1367
+                ],
+                [
+                    380,
+                    1370
+                ],
+                [
+                    388,
+                    1116
+                ],
+                [
+                    259,
+                    1159
+                ]
+            ]
+        },
+        {
+            "id": 3,
+            "shape_type": "irregular",
+            "vertices_count": 4,
+            "vertex_labels": {
+                "A": [
+                    757,
+                    644
+                ],
+                "B": [
+                    756,
+                    749
+                ],
+                "C": [
+                    1032,
+                    749
+                ],
+                "D": [
+                    1029,
+                    646
+                ]
+            },
+            "side_lengths_cm": {
+                "AB": 1.94,
+                "BC": 5.09,
+                "CD": 1.9,
+                "DA": 5.01
+            },
+            "angles_deg": {
+                "A": 90.12,
+                "B": 89.45,
+                "C": 88.33,
+                "D": 92.09
+            },
+            "area_cm2": 9.99,
+            "perimeter_cm": 14.17,
+            "bbox_width_cm": 5.14,
+            "bbox_height_cm": 2.06,
+            "centroid_x": 893,
+            "centroid_y": 697,
+            "contour_points": [
+                [
+                    757,
+                    644
+                ],
+                [
+                    756,
+                    749
+                ],
+                [
+                    1032,
+                    749
+                ],
+                [
+                    1029,
+                    646
+                ]
+            ]
+        },
+        {
+            "id": 4,
+            "shape_type": "irregular",
+            "vertices_count": 3,
+            "vertex_labels": {
+                "A": [
+                    287,
+                    522
+                ],
+                "B": [
+                    198,
+                    764
+                ],
+                "C": [
+                    464,
+                    771
+                ]
+            },
+            "side_lengths_cm": {
+                "AB": 4.75,
+                "BC": 4.9,
+                "CA": 5.63
+            },
+            "angles_deg": {
+                "A": 55.6,
+                "B": 71.32,
+                "C": 53.09
+            },
+            "area_cm2": 11.43,
+            "perimeter_cm": 16.2,
+            "bbox_width_cm": 4.98,
+            "bbox_height_cm": 4.63,
+            "centroid_x": 319,
+            "centroid_y": 685,
+            "contour_points": [
+                [
+                    287,
+                    522
+                ],
+                [
+                    198,
+                    764
+                ],
+                [
+                    464,
+                    771
+                ]
+            ]
+        }
+    ]
+}

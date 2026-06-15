@@ -10,12 +10,16 @@ Orchestrates all four phases:
 
 from __future__ import annotations
 
+import json
 import logging
 import sys
+from pathlib import Path
 from typing import List
 
 import numpy as np
+from shapely import affinity
 from shapely.geometry import Polygon
+from shapely.validation import make_valid
 
 from geometry_utils import normalize_polygon
 from models import EnvironmentBounds, FitnessResult, InventoryPiece
@@ -37,16 +41,15 @@ logger = logging.getLogger(__name__)
 
 def build_inventory() -> List[InventoryPiece]:
     """
-    Inventory tuned to make the 90%-scale house the fitness sweet-spot.
+    Inventory tuned for the multi-scale sweep (50 → 100 %, step 10 %).
+    Fitness = -w1*cuts -w2*cut_len -w3*uncovered -w4*waste  (scale not in formula).
 
     Design logic
     ------------
-    score = scale_factor - w1*cuts - w2*cut_len - w3*uncovered - w4*waste
-
-    For 90% to beat 100%, we need:  P(100%) - P(90%) > 0.10
-    With the heavy w3=0.65 set below, a 25-pt coverage gap is enough:
-      P(100%) contains  0.65 * 0.30 = 0.195  just from uncoverage
-      P(90%)  contains  0.65 * 0.05 = 0.033  when coverage is 95%
+    For 90% to be the winner, the coverage at 90% must be substantially
+    higher than at 100%, so the w3*uncov_norm penalty makes 90% win:
+      P(100%) contains  0.91 * 0.30 = 0.273  just from uncoverage
+      P(90%)  contains  0.91 * 0.05 = 0.046  when coverage is 95%
 
     To force that coverage gap:
       * Total material = ~112 000 sq units
@@ -93,6 +96,123 @@ def build_inventory() -> List[InventoryPiece]:
         "Inventory: %d pieces, total area=%.0f  "
         "(house@90%% ~107 000 | house@100%% ~160 000)",
         len(pieces), total,
+    )
+    return pieces
+
+
+# ---------------------------------------------------------------------------
+# JSON inventory loader  (reads from inventory_pieces/ folder)
+# ---------------------------------------------------------------------------
+
+#: Folder where scrap JSON files are dropped.  Created automatically if absent.
+INVENTORY_FOLDER = Path(__file__).parent / "inventory_pieces"
+
+#: Physical width of the target object in cm.
+#: Used to scale piece cm measurements into pipeline world units.
+#: Adjust this to match the real-world size of your target shape.
+TARGET_PHYSICAL_WIDTH_CM: float = 20
+
+
+def load_inventory_from_folder(
+    folder: Path = INVENTORY_FOLDER,
+    world_units_per_cm: float | None = None,
+    bounds: EnvironmentBounds | None = None,
+) -> List[InventoryPiece]:
+    """
+    Read every ``*.json`` file in *folder*, convert scrap detections to
+    InventoryPiece objects, and return them as a flat list.
+
+    Each JSON must follow the scrap-detector output format::
+
+        {
+          "cm_per_pixel": <float>,
+          "scraps": [
+            {
+              "id": <int|str>,
+              "contour_points": [[x, y], ...],   # pixel coords, y-down
+              ...
+            },
+            ...
+          ]
+        }
+
+    Parameters
+    ----------
+    folder            : Directory to scan for JSON files (created if missing).
+    world_units_per_cm: Scale factor cm → pipeline world units.
+                        Defaults to  BOUNDS.width / TARGET_PHYSICAL_WIDTH_CM.
+    bounds            : EnvironmentBounds used only when world_units_per_cm is None.
+    """
+    folder.mkdir(parents=True, exist_ok=True)
+
+    json_files = sorted(folder.glob("*.json"))
+    if not json_files:
+        logger.warning(
+            "inventory_pieces/ folder is empty — falling back to built-in inventory."
+        )
+        return []
+
+    if world_units_per_cm is None:
+        b = bounds or EnvironmentBounds(width=600, height=500)
+        world_units_per_cm = b.width / TARGET_PHYSICAL_WIDTH_CM
+
+    pieces: List[InventoryPiece] = []
+
+    for json_path in json_files:
+        try:
+            data = json.loads(json_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("Skipping %s — could not parse JSON: %s", json_path.name, exc)
+            continue
+
+        cm_per_pixel = data.get("cm_per_pixel", 1.0)
+
+        for scrap in data.get("scraps", []):
+            scrap_id = scrap.get("id", "?")
+            pts_px = scrap.get("contour_points", [])
+
+            if len(pts_px) < 3:
+                logger.warning("scrap %s in %s has < 3 points — skipped.",
+                               scrap_id, json_path.name)
+                continue
+
+            try:
+                # 1. Pixel → cm
+                pts_cm = [(x * cm_per_pixel, y * cm_per_pixel) for x, y in pts_px]
+
+                # 2. Flip Y  (image: y=0 top  →  math: y=0 bottom)
+                max_y_cm = max(y for _, y in pts_cm)
+                pts_flipped = [(x, max_y_cm - y) for x, y in pts_cm]
+
+                # 3. Build and validate polygon
+                poly = make_valid(Polygon(pts_flipped))
+                if poly.is_empty or poly.area <= 0:
+                    logger.warning("scrap %s in %s produced empty polygon — skipped.",
+                                   scrap_id, json_path.name)
+                    continue
+
+                # 4. Scale cm → world units
+                poly = affinity.scale(
+                    poly,
+                    xfact=world_units_per_cm,
+                    yfact=world_units_per_cm,
+                    origin=(0, 0),
+                )
+
+                piece_id = f"{json_path.stem}_scrap_{scrap_id}"
+                pieces.append(InventoryPiece(
+                    piece_id=piece_id,
+                    polygon=poly,
+                    material=scrap.get("material", "scrap"),
+                ))
+
+            except Exception as exc:
+                logger.warning("scrap %s in %s could not be converted: %s",
+                               scrap_id, json_path.name, exc)
+
+    logger.info(
+        "Loaded %d pieces from %d JSON file(s) in '%s'",
+        len(pieces), len(json_files), folder.name,
     )
     return pieces
 
@@ -329,16 +449,13 @@ def main() -> FitnessResult | None:
     logger.info("=" * 65)
 
     FITNESS_WEIGHTS = (
-        0.0,    # w1 — cuts
-        0.0,    # w2 — cut length
-        1.0,    # w3 — uncovered
-        0.0,    # w4 — waste
+        0.03,   # w1 — cuts
+        0.03,   # w2 — cut length
+        0.91,   # w3 — uncovered  (dominant)
+        0.03,   # w4 — waste
     )
-    # WHY w3=0.80 makes 90% the winner:
-    #   coverage gap between 90% (74%) and 100% (59%) = 15 pts
-    #   0.80 x 0.15 = 0.12  >  scale-factor gap of 0.10  -> 90% wins
 
-    SCALE_STEP = 0.10   # use 0.05 for production runs (slower but finer)
+    SCALE_STEP = 0.10   # steps: 50 → 60 → 70 → 80 → 90 → 100 %
 
     LAYOUT_KWARGS = {
         "n_structural_zones": 6,
@@ -390,7 +507,11 @@ def main() -> FitnessResult | None:
     # ── Phase 2: Multi-Scale Sweep (contains Phase 3 + 4 calls) ─────
     logger.info("\n[Phase 2] Multi-scale optimisation sweep")
 
-    inventory = build_inventory()
+    # Load from inventory_pieces/ folder; fall back to built-in if folder is empty
+    inventory = load_inventory_from_folder(bounds=BOUNDS)
+    if not inventory:
+        logger.info("  Using built-in inventory (no JSON files found).")
+        inventory = build_inventory()
     logger.info("  Inventory: %d pieces", len(inventory))
 
     optimizer = MultiScaleOptimizer(

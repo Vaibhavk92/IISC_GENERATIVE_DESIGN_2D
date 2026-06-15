@@ -3,14 +3,13 @@ phase4_fitness.py — Phase 4: Fitness Scoring & Best Layout Selection
 
 Fitness function (higher = better):
 
-    Score = scale_factor
-          - w1 * N_cuts_norm
-          - w2 * cut_length_norm
-          - w3 * uncovered_area_norm
-          - w4 * waste_area_norm
+    Score = - w1 * N_cuts_norm
+            - w2 * cut_length_norm
+            - w3 * uncovered_area_norm
+            - w4 * waste_area_norm
 
-All penalty terms are normalised to [0, 1] so the four weights are
-directly comparable regardless of units or polygon size.
+Scale is varied externally (50 → 60 → 70 → 80 → 90 → 100 %) and is NOT
+part of the formula.  All penalty terms are normalised to [0, 1].
 """
 
 from __future__ import annotations
@@ -29,37 +28,34 @@ _CUT_LENGTH_PERIMETER_RATIO = 8.0   # max expected cut_length / target_perimeter
 
 class FitnessEvaluator:
     """
-    Computes a scalar fitness score for a Layout at a given scale factor.
+    Computes a scalar fitness score for a Layout.
+
+    Scale is NOT a parameter — it is varied externally (50/60/70/80/90/100 %)
+    so the best-fit scale emerges from comparing scores across runs.
 
     Formula
     -------
-        Score = scale_factor
-              - w1 * cuts_norm           (cut complexity)
-              - w2 * cut_length_norm     (cut effort)
-              - w3 * uncovered_norm      (shape fidelity -- PRIMARY objective)
-              - w4 * waste_norm          (material efficiency)
+        Score = - w1 * cuts_norm           (cut complexity)
+                - w2 * cut_length_norm     (cut effort)
+                - w3 * uncovered_norm      (shape fidelity — PRIMARY objective)
+                - w4 * waste_norm          (material efficiency)
 
-    All penalty terms are normalised to [0, 1] so weights are directly
-    comparable regardless of polygon size or units.
-
-    Coverage (w3) is the dominant term.  A large w3 (e.g. 0.80) means a
-    15-point coverage gap outweighs a 10-point scale-factor gap, allowing
-    a sub-100% scale step to win when inventory pieces fit it better.
+    All penalty terms are normalised to [0, 1].
 
     Parameters
     ----------
     weights : (w1, w2, w3, w4)
-        Default (0.08, 0.04, 0.80, 0.08) prioritises coverage above all else.
+        Default (0.03, 0.03, 0.91, 0.03) — coverage is the dominant term.
     """
 
     def __init__(
         self,
-        weights: Tuple[float, float, float, float] = (0.01, 0.01, 0.96, 0.02),
+        weights: Tuple[float, float, float, float] = (0.03, 0.03, 0.91, 0.03),
     ):
         self.w1, self.w2, self.w3, self.w4 = weights
 
     # ------------------------------------------------------------------
-    def score(self, layout: Layout, scale_factor: float) -> float:
+    def score(self, layout: Layout) -> float:
         """
         Compute and return the scalar fitness score.
 
@@ -95,7 +91,6 @@ class FitnessEvaluator:
         waste_norm = min(layout.total_waste_area / target_area, 1.0)
 
         fitness = (
-            scale_factor
             - self.w1 * cuts_norm
             - self.w2 * cut_len_norm
             - self.w3 * uncov_norm
@@ -103,9 +98,8 @@ class FitnessEvaluator:
         )
 
         logger.debug(
-            "score | scale=%.2f | cuts=%.3fx%.2f | cut_len=%.3fx%.2f | "
+            "score | cuts=%.3fx%.2f | cut_len=%.3fx%.2f | "
             "uncov=%.3fx%.2f | waste=%.3fx%.2f -> %.4f",
-            scale_factor,
             cuts_norm, self.w1,
             cut_len_norm, self.w2,
             uncov_norm, self.w3,
@@ -144,7 +138,7 @@ class FitnessEvaluator:
             "uncov_norm": min(layout.uncovered_area / target_area, 1.0) if target_area else 0.0,
             "waste_norm": min(layout.total_waste_area / target_area, 1.0) if target_area else 0.0,
             # Final score
-            "score": self.score(layout, scale_factor),
+            "score": self.score(layout),
             "weights": {"w1": self.w1, "w2": self.w2, "w3": self.w3, "w4": self.w4},
         }
 

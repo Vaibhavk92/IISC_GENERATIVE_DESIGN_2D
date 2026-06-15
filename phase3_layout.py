@@ -36,8 +36,13 @@ from models import EnvironmentBounds, InventoryPiece, Layout, PlacedPiece
 
 logger = logging.getLogger(__name__)
 
-# Minimum coverage (as fraction of remaining-target area) to bother placing a piece
-MIN_COVERAGE_RATIO = 0.03
+# Minimum coverage thresholds.
+# MIN_COVERAGE_RATIO: fraction of remaining-target area that must be covered.
+#   Kept small so real-world scrap pieces (physically small relative to a large
+#   target) are still placed rather than silently skipped.
+MIN_COVERAGE_RATIO = 0.001   # 0.1%  (was 0.03 — too strict for small scraps)
+# Absolute floor in world-units²: guards against degenerate near-zero overlaps.
+MIN_COVERAGE_ABS = 10.0
 
 # Candidate rotation angles (degrees)
 DEFAULT_ROTATIONS = list(range(0, 360, 30))
@@ -203,7 +208,8 @@ class GreedyPlacementEngine:
                         continue
 
                     # Skip placements that barely cover anything
-                    if cand.coverage < remaining_area * MIN_COVERAGE_RATIO:
+                    if cand.coverage < max(remaining_area * MIN_COVERAGE_RATIO,
+                                           MIN_COVERAGE_ABS):
                         continue
 
                     score = cand.placement_score(remaining_area)

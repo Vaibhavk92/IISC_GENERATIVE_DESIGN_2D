@@ -124,7 +124,7 @@ class MultiScaleOptimizer:
             **self.layout_kwargs,
         )
         layout = engine.run()
-        s = self.evaluator.score(layout, scale)
+        s = self.evaluator.score(layout)
 
         return FitnessResult(
             scale_factor=scale,
