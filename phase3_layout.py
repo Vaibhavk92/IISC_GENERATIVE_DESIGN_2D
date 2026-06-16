@@ -13,7 +13,9 @@ Algorithm (single scale):
 
 from __future__ import annotations
 
+import bisect
 import logging
+import math
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
@@ -43,6 +45,12 @@ logger = logging.getLogger(__name__)
 MIN_COVERAGE_RATIO = 0.001   # 0.1%  (was 0.03 — too strict for small scraps)
 # Absolute floor in world-units²: guards against degenerate near-zero overlaps.
 MIN_COVERAGE_ABS = 10.0
+
+# Zone-area matching: for each zone we pick the piece whose area is just above
+# the zone's inscribed-circle capacity.  _ZONE_MATCH_LOOKAHEAD controls how
+# many pieces *larger* than the best-fit we also try (shape may not fit even if
+# area matches).  1 piece *smaller* is always tried as a geometric fallback.
+_ZONE_MATCH_LOOKAHEAD = 2
 
 # Candidate rotation angles (degrees)
 DEFAULT_ROTATIONS = list(range(0, 360, 30))
@@ -112,7 +120,8 @@ class GreedyPlacementEngine:
         """
         Parameters
         ----------
-        inventory            : All available pieces (will be sorted largest-first).
+        inventory            : All available pieces (ordering does not matter;
+                               _find_best_placement sorts per-zone internally).
         target_polygon       : The scaled target shape to fill.
         bounds               : Environment bounding box (for guard-rail clipping).
         n_structural_zones   : How many hotspot zones to probe on each iteration.
@@ -120,7 +129,7 @@ class GreedyPlacementEngine:
         min_remaining_area   : Stop when remaining target area falls below this.
         allow_piece_reuse    : If True, the same piece can be placed multiple times.
         """
-        self.inventory = sorted(inventory, key=lambda p: p.area, reverse=True)
+        self.inventory = list(inventory)   # ordering handled per-zone in _find_best_placement
         self.target_polygon = _as_valid(target_polygon)
         self.bounds = bounds
         self.n_zones = n_structural_zones
@@ -194,15 +203,43 @@ class GreedyPlacementEngine:
         zones: List[Tuple[float, float, float]],
     ) -> Optional[_Candidate]:
         """
-        Exhaustive search over (piece x zone x rotation).
-        Returns the candidate with the highest placement_score.
+        Zone-area matched search.
+
+        For each zone the estimated fillable capacity is the area of the largest
+        inscribed circle:  capacity = π × zone_thickness².
+
+        Only pieces whose area is *just above* that capacity are tried in that
+        zone — specifically the first piece >= capacity and up to
+        _ZONE_MATCH_LOOKAHEAD larger ones (geometric shape might not fit even
+        if area matches), plus one piece smaller as a last-resort fallback.
+
+        This stops large pieces from being dropped into small gaps.
         """
         best: Optional[_Candidate] = None
         best_score = -1.0
         remaining_area = polygon_area_safe(remaining)
 
-        for piece in available:
-            for zone_x, zone_y, zone_thickness in zones:
+        # Sort ascending by area once; reuse across all zones
+        sorted_pieces = sorted(available, key=lambda p: p.area)
+        piece_areas = [p.area for p in sorted_pieces]
+
+        for zone_x, zone_y, zone_thickness in zones:
+            # Inscribed-circle area at this zone point (world units²)
+            zone_capacity = math.pi * zone_thickness ** 2
+
+            # Index of the first piece with area >= zone_capacity
+            idx = bisect.bisect_left(piece_areas, zone_capacity)
+
+            # Window: one piece smaller (fallback) + matched + lookahead
+            lo = max(0, idx - 1)
+            hi = min(len(sorted_pieces), idx + _ZONE_MATCH_LOOKAHEAD + 1)
+            zone_candidates = sorted_pieces[lo:hi]
+
+            if not zone_candidates:
+                # All pieces are smaller than the zone — take the largest one
+                zone_candidates = sorted_pieces[-1:]
+
+            for piece in zone_candidates:
                 for angle in self.rotations:
                     cand = self._try_placement(
                         piece, remaining, zone_x, zone_y, angle
@@ -210,7 +247,6 @@ class GreedyPlacementEngine:
                     if cand is None:
                         continue
 
-                    # Skip placements that barely cover anything
                     if cand.coverage < max(remaining_area * MIN_COVERAGE_RATIO,
                                            MIN_COVERAGE_ABS):
                         continue
