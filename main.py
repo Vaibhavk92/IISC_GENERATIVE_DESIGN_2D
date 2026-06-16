@@ -401,6 +401,160 @@ def visualize_all(
         logger.warning("visualize_all failed: %s", exc)
 
 
+def save_per_piece_cuts(
+    best: FitnessResult,
+    out_dir: str = "cuts_output",
+    world_units_per_cm: float | None = None,
+) -> None:
+    """
+    For every placed piece in the winning layout, write two files into *out_dir*:
+
+      {piece_id}.png  — diagram: full piece footprint, kept area, waste, cut lines
+      {piece_id}.json — machine-readable cut-line coordinates and measurements
+    """
+    import os
+    os.makedirs(out_dir, exist_ok=True)
+
+    # Scale factor for displaying lengths in cm (optional, purely cosmetic)
+    wu_per_cm = world_units_per_cm or (600 / TARGET_PHYSICAL_WIDTH_CM)
+
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from matplotlib.patches import PathPatch
+        from matplotlib.path import Path as MPath
+
+        def _poly_patch(poly, **kw):
+            if poly is None or poly.is_empty:
+                return None
+            coords = list(poly.exterior.coords)
+            codes = ([MPath.MOVETO]
+                     + [MPath.LINETO] * (len(coords) - 2)
+                     + [MPath.CLOSEPOLY])
+            return PathPatch(MPath(coords, codes), **kw)
+
+        layout = best.layout
+
+        for pp in layout.placed_pieces:
+            pid = pp.piece.piece_id
+            safe_pid = pid.replace("/", "_").replace("\\", "_")
+
+            # ── PNG ───────────────────────────────────────────────────
+            fig, ax = plt.subplots(figsize=(7, 7))
+            ax.set_aspect("equal")
+            ax.set_facecolor("#f8f8f5")
+
+            # Full piece outline (light fill so cuts stand out)
+            patch = _poly_patch(pp.transformed_polygon,
+                                 facecolor="#d0e8ff", edgecolor="#336699",
+                                 linewidth=1.2, zorder=1, label="Full piece")
+            if patch:
+                ax.add_patch(patch)
+
+            # Waste zone (part that gets cut away)
+            if pp.waste_polygon and not pp.waste_polygon.is_empty:
+                patch = _poly_patch(pp.waste_polygon,
+                                     facecolor="#ffcccc", edgecolor="#cc3300",
+                                     linewidth=0.8, linestyle="--", zorder=2,
+                                     label="Waste (cut away)", alpha=0.6)
+                if patch:
+                    ax.add_patch(patch)
+
+            # Kept area (intersection with target)
+            if pp.intersection_with_target and not pp.intersection_with_target.is_empty:
+                patch = _poly_patch(pp.intersection_with_target,
+                                     facecolor="#66bb88", edgecolor="#225533",
+                                     linewidth=1.0, zorder=3, alpha=0.75,
+                                     label="Kept (inside target)")
+                if patch:
+                    ax.add_patch(patch)
+
+            # Cut lines — drawn thick in red, annotated with length
+            for idx, cl in enumerate(pp.cut_lines):
+                xs, ys = cl.geometry.xy
+                ax.plot(xs, ys, color="#dd0000", linewidth=2.5, zorder=5,
+                        solid_capstyle="round",
+                        label="Cut line" if idx == 0 else "_")
+                # Length label at midpoint
+                mx = (xs[0] + xs[-1]) / 2
+                my = (ys[0] + ys[-1]) / 2
+                length_cm = cl.length / wu_per_cm
+                ax.text(mx, my, f"{length_cm:.1f} cm",
+                        fontsize=7, color="#aa0000", zorder=6,
+                        ha="center", va="bottom",
+                        bbox=dict(boxstyle="round,pad=0.15", fc="white",
+                                  ec="none", alpha=0.7))
+
+            covered_cm2 = pp.covered_area / (wu_per_cm ** 2)
+            waste_cm2   = pp.waste_area   / (wu_per_cm ** 2)
+            ax.set_title(
+                f"{pid}\n"
+                f"Rotation: {pp.rotation_degrees:.0f}°  |  "
+                f"Cuts: {pp.num_cuts}  |  "
+                f"Total cut length: {pp.total_cut_length / wu_per_cm:.1f} cm\n"
+                f"Kept: {covered_cm2:.2f} cm²   Waste: {waste_cm2:.2f} cm²",
+                fontsize=9,
+            )
+
+            handles, labels = ax.get_legend_handles_labels()
+            # deduplicate legend
+            seen = {}
+            for h, l in zip(handles, labels):
+                if l not in seen:
+                    seen[l] = h
+            ax.legend(seen.values(), seen.keys(), fontsize=7, loc="lower right")
+
+            ax.autoscale_view()
+            ax.margins(0.10)
+            fig.tight_layout()
+            png_path = os.path.join(out_dir, f"{safe_pid}.png")
+            fig.savefig(png_path, dpi=150, bbox_inches="tight")
+            plt.close(fig)
+
+            # ── JSON ──────────────────────────────────────────────────
+            cuts_data = []
+            for idx, cl in enumerate(pp.cut_lines):
+                coords = list(cl.geometry.coords)
+                cuts_data.append({
+                    "cut_index": idx,
+                    "length_world": round(cl.length, 4),
+                    "length_cm": round(cl.length / wu_per_cm, 4),
+                    "is_straight": cl.is_straight,
+                    "num_vertices": len(coords),
+                    "coordinates_world": [[round(x, 3), round(y, 3)]
+                                          for x, y in coords],
+                })
+
+            piece_data = {
+                "piece_id": pid,
+                "rotation_degrees": pp.rotation_degrees,
+                "position_dx": round(pp.position[0], 3),
+                "position_dy": round(pp.position[1], 3),
+                "covered_area_world": round(pp.covered_area, 3),
+                "covered_area_cm2":   round(covered_cm2, 4),
+                "waste_area_world":   round(pp.waste_area, 3),
+                "waste_area_cm2":     round(waste_cm2, 4),
+                "num_cuts": pp.num_cuts,
+                "total_cut_length_world": round(pp.total_cut_length, 3),
+                "total_cut_length_cm":    round(pp.total_cut_length / wu_per_cm, 4),
+                "cuts": cuts_data,
+            }
+
+            json_path = os.path.join(out_dir, f"{safe_pid}.json")
+            Path(json_path).write_text(
+                json.dumps(piece_data, indent=2), encoding="utf-8"
+            )
+            logger.info("  Saved cut files: %s  (cuts=%d)", safe_pid, pp.num_cuts)
+
+        logger.info("Per-piece cut files written to '%s/'", out_dir)
+
+    except ImportError:
+        logger.warning("matplotlib not available — skipping per-piece cut diagrams.")
+    except Exception as exc:
+        logger.warning("save_per_piece_cuts failed: %s", exc)
+
+
 def plot_score_curve(selector: BestLayoutSelector, out_path: str = "score_curve.png") -> None:
     """Line plot of score vs scale factor across all iterations."""
     try:
@@ -548,9 +702,11 @@ def main() -> FitnessResult | None:
     visualize(best, out_path="output_layout.png")
     visualize_all(optimizer.all_results, best, out_path="all_scales_layout.png")
     plot_score_curve(selector, out_path="score_curve.png")
+    save_per_piece_cuts(best, out_dir="cuts_output")
 
     logger.info("\nDone.  Output files: silhouette.png, contour_debug.png, "
-                "output_layout.png, all_scales_layout.png, score_curve.png")
+                "output_layout.png, all_scales_layout.png, score_curve.png, "
+                "cuts_output/{piece_id}.png + .json")
     return best
 
 
