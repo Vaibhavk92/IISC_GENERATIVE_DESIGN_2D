@@ -160,9 +160,12 @@ class GreedyPlacementEngine:
             placed_piece = self._commit(best, remaining)
             layout.placed_pieces.append(placed_piece)
 
-            # Subtract the newly covered area from the remaining target
+            # Subtract the full placed-piece footprint from remaining_target so
+            # future zone-finding never lands inside an already-occupied area.
+            # (Coverage/uncovered-area accounting still uses intersection_with_target
+            #  stored per piece, so fitness scores are unaffected.)
             layout.remaining_target = self._subtract_covered(
-                layout.remaining_target, placed_piece.intersection_with_target
+                layout.remaining_target, placed_piece.transformed_polygon
             )
 
             if not self.allow_reuse:
