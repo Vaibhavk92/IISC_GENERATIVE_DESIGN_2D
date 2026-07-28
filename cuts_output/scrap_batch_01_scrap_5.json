@@ -1,0 +1,131 @@
+{
+  "piece_id": "scrap_batch_01_scrap_5",
+  "rotation_degrees": 270,
+  "position_dx": -268.139,
+  "position_dy": 179.309,
+  "covered_area_world": 7078.731,
+  "covered_area_cm2": 7.8653,
+  "waste_area_world": 4073.548,
+  "waste_area_cm2": 4.5262,
+  "num_cuts": 4,
+  "total_cut_length_world": 256.151,
+  "total_cut_length_cm": 8.5384,
+  "cuts": [
+    {
+      "cut_index": 0,
+      "length_world": 103.1302,
+      "length_cm": 3.4377,
+      "is_straight": false,
+      "num_vertices": 10,
+      "coordinates_world": [
+        [
+          267.417,
+          278.708
+        ],
+        [
+          267.417,
+          278.708
+        ],
+        [
+          305.46,
+          279.413
+        ],
+        [
+          305.46,
+          279.413
+        ],
+        [
+          305.46,
+          279.413
+        ],
+        [
+          341.742,
+          260.744
+        ],
+        [
+          341.742,
+          260.744
+        ],
+        [
+          341.742,
+          260.744
+        ],
+        [
+          341.742,
+          260.744
+        ],
+        [
+          365.426,
+          255.409
+        ]
+      ]
+    },
+    {
+      "cut_index": 1,
+      "length_world": 3.7547,
+      "length_cm": 0.1252,
+      "is_straight": false,
+      "num_vertices": 5,
+      "coordinates_world": [
+        [
+          389.292,
+          242.187
+        ],
+        [
+          390.0,
+          241.37
+        ],
+        [
+          390.0,
+          241.37
+        ],
+        [
+          390.0,
+          241.37
+        ],
+        [
+          390.0,
+          238.697
+        ]
+      ]
+    },
+    {
+      "cut_index": 2,
+      "length_world": 103.9004,
+      "length_cm": 3.4633,
+      "is_straight": true,
+      "num_vertices": 2,
+      "coordinates_world": [
+        [
+          340.184,
+          220.842
+        ],
+        [
+          236.284,
+          220.639
+        ]
+      ]
+    },
+    {
+      "cut_index": 3,
+      "length_world": 45.3662,
+      "length_cm": 1.5122,
+      "is_straight": false,
+      "num_vertices": 3,
+      "coordinates_world": [
+        [
+          224.071,
+          265.322
+        ],
+        [
+          267.417,
+          278.708
+        ],
+        [
+          267.417,
+          278.708
+        ]
+      ]
+    }
+  ]
+}

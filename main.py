@@ -23,7 +23,7 @@ from shapely.validation import make_valid
 
 from geometry_utils import normalize_polygon
 from models import EnvironmentBounds, FitnessResult, InventoryPiece
-from phase1_vision import ContourExtractor, ImageSilhouetteExtractor, SilhouetteGenerator
+from phase1_vision import ContourExtractor, ImageSilhouetteExtractor, SDXLTurboGenerator, SilhouetteGenerator
 from phase2_multiscale import MultiScaleOptimizer
 from phase4_fitness import BestLayoutSelector, FitnessEvaluator
 
@@ -590,33 +590,87 @@ def plot_score_curve(selector: BestLayoutSelector, out_path: str = "score_curve.
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _prompt_interface() -> dict:
+    """
+    Interactive CLI that asks the user how to source the target silhouette.
+    Returns a config dict consumed by main().
+    """
+    # Drain buffered Enter key from launching the script in Windows terminals
+    try:
+        import msvcrt
+        while msvcrt.kbhit():
+            msvcrt.getch()
+    except ImportError:
+        pass
+
+    DEFAULT_IMAGE = r"C:\Users\dhara\OneDrive\Desktop\GENERATIVE_DESIGN_2D\test_house_image.avif"
+
+    print("\n" + "=" * 60)
+    print("  GENERATIVE DESIGN 2D")
+    print("=" * 60)
+    print("\nSelect input mode:")
+    print("  [1] Existing image  — extract silhouette from a photo/file")
+    print("  [2] SDXL-Turbo      — generate image from a text prompt")
+    print("  [3] SDXL (full)     — generate silhouette via full SDXL")
+    print()
+
+    while True:
+        choice = input("Choice [1/2/3, default=1]: ").strip() or "1"
+        if choice in ("1", "2", "3"):
+            break
+        print("  Enter 1, 2, or 3.")
+
+    if choice == "1":
+        raw = input(f"Image path [default: {DEFAULT_IMAGE}]: ").strip()
+        image_path = raw if raw else DEFAULT_IMAGE
+        raw_prompt = input("Object prompt for detection [default: house]: ").strip()
+        prompt = raw_prompt if raw_prompt else "house"
+        return {"mode": "image", "image_path": image_path, "prompt": prompt}
+
+    if choice == "2":
+        prompt = ""
+        while not prompt:
+            prompt = input('Text prompt (e.g. "house", "car", "tree"): ').strip()
+            if not prompt:
+                print("  Prompt cannot be empty.")
+        raw_steps = input("Inference steps [1-4, default=2]: ").strip()
+        try:
+            steps = max(1, min(4, int(raw_steps)))
+        except ValueError:
+            steps = 2
+        return {"mode": "turbo", "prompt": prompt, "steps": steps}
+
+    # choice == "3"
+    prompt = ""
+    while not prompt:
+        prompt = input('Text prompt (e.g. "house", "bicycle"): ').strip()
+        if not prompt:
+            print("  Prompt cannot be empty.")
+    return {"mode": "sdxl", "prompt": prompt}
+
+
 def main() -> FitnessResult | None:
-    # ── Configuration ────────────────────────────────────────────────
-    # Set INPUT_IMAGE to use an existing photo/illustration as the source.
-    # Set PROMPT (and leave INPUT_IMAGE=None) to generate via SDXL instead.
-    INPUT_IMAGE: str | None = r"C:\Users\dhara\OneDrive\Desktop\GENERATIVE_DESIGN_2D\test_house_image.avif"
-    PROMPT: str = "house"
+    cfg = _prompt_interface()
+    mode   = cfg["mode"]
+    PROMPT = cfg.get("prompt", "house")
     BOUNDS = EnvironmentBounds(width=600, height=500)
 
     logger.info("=" * 65)
-    logger.info("  GENERATIVE DESIGN 2D PIPELINE  (prompt: '%s')", PROMPT)
+    logger.info("  GENERATIVE DESIGN 2D PIPELINE  mode=%s  prompt='%s'",
+                mode, PROMPT)
     logger.info("=" * 65)
 
     FITNESS_WEIGHTS = (
-        0.03,   # w1 — cuts
-        0.03,   # w2 — cut length
-        0.91,   # w3 — uncovered  (dominant)
-        0.03,   # w4 — waste
+        0.05,   # w1 — cut quality (count + complexity)
+        0.04,   # w2 — fragmentation of uncovered area
+        0.85,   # w3 — coverage, non-linear (dominant)
+        0.06,   # w4 — material efficiency (waste / piece area)
     )
 
     SCALE_STEP = 0.10   # steps: 50 → 60 → 70 → 80 → 90 → 100 %
 
     LAYOUT_KWARGS = {
         "n_structural_zones": 6,
-        # Orthogonal rotations only: prevents body_slab from tilting into a
-        # diamond that inflates coverage by reaching into the roof area at the
-        # cost of waste.  At 0 deg the 315x211 slab exactly matches the 90%-
-        # scale body zone -> zero waste, zero cuts.
         "rotation_candidates": [0, 90, 180, 270],
         "min_remaining_area": 50.0,
     }
@@ -624,16 +678,22 @@ def main() -> FitnessResult | None:
     # ── Phase 1: Silhouette & Contour ────────────────────────────────
     logger.info("\n[Phase 1] Silhouette generation + contour extraction")
 
-    if INPUT_IMAGE:
-        logger.info("  Mode: image-based extraction  (source: %s)", INPUT_IMAGE)
+    if mode == "image":
+        logger.info("  Mode: image  (source: %s)", cfg["image_path"])
         extractor_img = ImageSilhouetteExtractor(output_size=(512, 512))
         silhouette = extractor_img.extract_from_image(
-            image_path=INPUT_IMAGE,
+            image_path=cfg["image_path"],
             prompt=PROMPT,
             output_path="silhouette.png",
         )
+    elif mode == "turbo":
+        logger.info("  Mode: SDXL-Turbo  (prompt: '%s', steps: %d)",
+                    PROMPT, cfg["steps"])
+        gen = SDXLTurboGenerator(output_size=(512, 512),
+                                 num_inference_steps=cfg["steps"])
+        silhouette = gen.generate(prompt=PROMPT, output_path="silhouette.png")
     else:
-        logger.info("  Mode: text-to-silhouette  (prompt: '%s')", PROMPT)
+        logger.info("  Mode: SDXL full  (prompt: '%s')", PROMPT)
         gen = SilhouetteGenerator(output_size=(512, 512))
         silhouette = gen.generate(prompt=PROMPT, output_path="silhouette.png")
 

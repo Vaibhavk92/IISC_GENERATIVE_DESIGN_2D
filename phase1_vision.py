@@ -121,6 +121,131 @@ class SilhouetteGenerator:
 
 
 # ---------------------------------------------------------------------------
+# Step 1b — SDXL-Turbo image generation
+# ---------------------------------------------------------------------------
+
+class SDXLTurboGenerator:
+    """
+    Generates a silhouette from a text prompt using SDXL-Turbo.
+
+    Flow: text prompt → SDXL-Turbo (colour image) → temp PNG
+          → ImageSilhouetteExtractor (rembg / GrabCut) → binary mask
+
+    SDXL-Turbo is a distilled model: 1–4 steps. Uses guidance_scale=0.5
+    to enable negative prompt support while staying fast.
+    """
+
+    SILHOUETTE_TEMPLATE = (
+        "A single {subject} rendered as a minimalist silhouette. "
+        "Solid black filled shape with a clean, continuous outer contour. "
+        "Only the external outline is visible. "
+        "No internal details, cutouts, holes, markings, textures, or surface features. "
+        "Flat 2D vector graphic, centered in the frame, isolated on a pure white background. "
+        "High contrast, crisp edges, simple iconic shape, recognizable by its outer profile only."
+    )
+
+    NEGATIVE_PROMPT = (
+        "photorealistic, realistic, 3D, CGI, render, sculpture, "
+        "lighting, shadows, gradients, reflections, highlights, "
+        "texture, pattern, material, color, transparency, "
+        "outline only, line art, sketch, drawing, wireframe, "
+        "internal details, fine details, engraving, markings, labels, text, logo, watermark, "
+        "background, scenery, environment, floor, sky, multiple objects, clutter, cropped, partial object"
+    )
+
+    def __init__(
+        self,
+        output_size: Tuple[int, int] = (512, 512),
+        num_inference_steps: int = 2,
+    ):
+        self.output_size = output_size
+        self.num_inference_steps = max(1, min(4, num_inference_steps))
+        self._pipe = None
+
+    # ------------------------------------------------------------------
+    def generate(
+        self,
+        prompt: str,
+        output_path: Optional[str] = None,
+        raw_output_path: Optional[str] = "generated_raw.png",
+    ) -> np.ndarray:
+        """
+        Generate and return a binary silhouette mask (0=foreground, 255=background).
+        Saves the raw generated image to `raw_output_path` (default: generated_raw.png)
+        and the transparent RGBA silhouette to `output_path`.
+        """
+        self._ensure_pipeline()
+        pil_img = self._generate_image(prompt)
+
+        if raw_output_path:
+            pil_img.save(raw_output_path)
+            logger.info("SDXL-Turbo raw image saved -> %s", raw_output_path)
+
+        import os, tempfile
+        fd, tmp_path = tempfile.mkstemp(suffix=".png")
+        os.close(fd)
+        try:
+            pil_img.save(tmp_path)
+            extractor = ImageSilhouetteExtractor(output_size=self.output_size)
+            binary_mask = extractor.extract_from_image(
+                image_path=tmp_path,
+                prompt=prompt,
+                output_path=output_path,
+            )
+        finally:
+            os.unlink(tmp_path)
+
+        return binary_mask
+
+    # ------------------------------------------------------------------
+    def _ensure_pipeline(self):
+        if self._pipe is not None:
+            return
+        try:
+            import torch
+            from diffusers.pipelines.stable_diffusion_xl import StableDiffusionXLPipeline
+
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            dtype = torch.float16 if device == "cuda" else torch.float32
+            logger.info("Loading SDXL-Turbo on %s (dtype=%s)…", device, dtype)
+
+            self._pipe = StableDiffusionXLPipeline.from_pretrained(
+                "stabilityai/sdxl-turbo",
+                torch_dtype=dtype,
+                variant="fp16" if device == "cuda" else None,
+                use_safetensors=True,
+            ).to(device)
+
+            logger.info("SDXL-Turbo ready.")
+        except Exception as exc:
+            raise RuntimeError(
+                f"SDXL-Turbo pipeline failed to load: {exc}. "
+                "Install diffusers + torch, or use ImageSilhouetteExtractor "
+                "with an input image instead."
+            ) from exc
+
+    # ------------------------------------------------------------------
+    def _generate_image(self, prompt: str):
+        """Run SDXL-Turbo and return a PIL Image."""
+        w, h = self.output_size
+        full_prompt = self.SILHOUETTE_TEMPLATE.format(subject=prompt)
+        logger.info("SDXL-Turbo prompt: '%s'", full_prompt)
+        result = self._pipe(
+            prompt=full_prompt,
+            negative_prompt=self.NEGATIVE_PROMPT,
+            width=w,
+            height=h,
+            num_inference_steps=self.num_inference_steps,
+            guidance_scale=0.5,
+        )
+        logger.info(
+            "SDXL-Turbo generated image for prompt='%s' (%d steps).",
+            prompt, self.num_inference_steps,
+        )
+        return result.images[0]
+
+
+# ---------------------------------------------------------------------------
 # Step 2 — Image-based silhouette extraction
 # ---------------------------------------------------------------------------
 
@@ -240,7 +365,8 @@ class ImageSilhouetteExtractor:
         """
         bbox = self._detect_bbox(img_bgr, prompt) if prompt else None
         return self._grabcut(img_bgr, bbox=bbox)
- 
+
+
     # ------------------------------------------------------------------
     @staticmethod
     def _detect_bbox(
@@ -265,7 +391,7 @@ class ImageSilhouetteExtractor:
 
             detector = hf_pipeline(
                 "zero-shot-object-detection",
-                model="google/owlvit-base-patch32",
+                model="google/owlv2-base-patch16",
             )
             results = detector(pil_img, candidate_labels=[prompt])
 

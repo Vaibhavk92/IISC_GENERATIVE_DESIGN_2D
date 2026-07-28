@@ -21,3 +21,6 @@ score_curve.png
 *.bin
 *.ckpt
 models/
+
+# Local editor/tool settings
+.claude/settings.local.json

@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(python -m pip install -r \"c:\\\\Users\\\\dhara\\\\OneDrive\\\\Desktop\\\\GENERATIVE_DESIGN_2D\\\\requirements.txt\")",
+      "PowerShell(python -m pip install transformers torch diffusers rembg accelerate)",
+      "PowerShell(\\(Get-Command python\\).Source)",
+      "PowerShell(python -c \"import numpy, cv2, shapely; print\\('core packages OK'\\)\")",
+      "Read(//c/Users/dhara/AppData/Local/Python/pythoncore-3.14-64/**)",
+      "PowerShell(& \"C:\\\\Users\\\\dhara\\\\AppData\\\\Local\\\\Python\\\\pythoncore-3.14-64\\\\python.exe\" -m venv \"c:\\\\Users\\\\dhara\\\\OneDrive\\\\Desktop\\\\GENERATIVE_DESIGN_2D\\\\.venv\")",
+      "PowerShell(& \"c:\\\\Users\\\\dhara\\\\OneDrive\\\\Desktop\\\\GENERATIVE_DESIGN_2D\\\\.venv\\\\Scripts\\\\python.exe\" -m pip install shapely numpy opencv-python scipy matplotlib transformers torch diffusers rembg accelerate)",
+      "PowerShell(& \"c:\\\\Users\\\\dhara\\\\OneDrive\\\\Desktop\\\\GENERATIVE_DESIGN_2D\\\\.venv\\\\Scripts\\\\python.exe\" -c \"import numpy, cv2, shapely, scipy, matplotlib, torch, transformers, diffusers, rembg; print\\('All packages OK'\\)\")",
+      "PowerShell(& \"c:\\\\Users\\\\dhara\\\\OneDrive\\\\Desktop\\\\GENERATIVE_DESIGN_2D\\\\.venv\\\\Scripts\\\\python.exe\" -m pip install \"rembg[cpu]\")",
+      "Read(//c/Users/dhara/AppData/Local/Temp/**)",
+      "PowerShell(& \"c:\\\\Users\\\\dhara\\\\OneDrive\\\\Desktop\\\\GENERATIVE_DESIGN_2D\\\\.venv\\\\Scripts\\\\python.exe\" -m pip install streamlit --quiet)",
+      "PowerShell(Start-Process -FilePath \"c:\\\\Users\\\\dhara\\\\OneDrive\\\\Desktop\\\\GENERATIVE_DESIGN_2D\\\\.venv\\\\Scripts\\\\streamlit.exe\" -ArgumentList \"run\",\"c:\\\\Users\\\\dhara\\\\OneDrive\\\\Desktop\\\\GENERATIVE_DESIGN_2D\\\\app.py\",\"--server.headless\",\"true\",\"--server.port\",\"8501\" -NoNewWindow -PassThru)",
+      "PowerShell(Start-Sleep -Seconds 5; try { $r = Invoke-WebRequest -Uri \"http://localhost:8501\" -TimeoutSec 5 -UseBasicParsing; \"HTTP $\\($r.StatusCode\\)\" } catch { $_.Exception.Message })",
+      "PowerShell(Stop-Process -Id 32548 -Force -ErrorAction SilentlyContinue)",
+      "PowerShell(& \"c:\\\\Users\\\\dhara\\\\OneDrive\\\\Desktop\\\\GENERATIVE_DESIGN_2D\\\\.venv\\\\Scripts\\\\python.exe\" -c \"import torch; print\\('torch', torch.__version__\\); from diffusers import AutoPipelineForText2Image; print\\('diffusers ok'\\)\" 2>&1)",
+      "PowerShell(& \"c:\\\\Users\\\\dhara\\\\OneDrive\\\\Desktop\\\\GENERATIVE_DESIGN_2D\\\\.venv\\\\Scripts\\\\python.exe\" -c \"import importlib.metadata; print\\(repr\\(importlib.metadata.version\\('transformers'\\)\\)\\)\" 2>&1)",
+      "PowerShell(& \"c:\\\\Users\\\\dhara\\\\OneDrive\\\\Desktop\\\\GENERATIVE_DESIGN_2D\\\\.venv\\\\Scripts\\\\pip.exe\" show transformers 2>&1)",
+      "PowerShell(& \"c:\\\\Users\\\\dhara\\\\OneDrive\\\\Desktop\\\\GENERATIVE_DESIGN_2D\\\\.venv\\\\Scripts\\\\python.exe\" -c \"import importlib.metadata; print\\('transformers', importlib.metadata.version\\('transformers'\\)\\); from diffusers import AutoPipelineForText2Image; print\\('diffusers ok'\\)\" 2>&1)",
+      "PowerShell(& \"c:\\\\Users\\\\dhara\\\\OneDrive\\\\Desktop\\\\GENERATIVE_DESIGN_2D\\\\.venv\\\\Scripts\\\\python.exe\" -c \"from diffusers import AutoPipelineForText2Image; print\\('diffusers ok'\\)\" 2>&1)",
+      "PowerShell(& \"c:\\\\Users\\\\dhara\\\\OneDrive\\\\Desktop\\\\GENERATIVE_DESIGN_2D\\\\.venv\\\\Scripts\\\\python.exe\" -c \"import importlib.metadata; print\\('tqdm:', importlib.metadata.version\\('tqdm'\\)\\)\")",
+      "PowerShell(Start-Process -FilePath \"c:\\\\Users\\\\dhara\\\\OneDrive\\\\Desktop\\\\GENERATIVE_DESIGN_2D\\\\.venv\\\\Scripts\\\\streamlit.exe\" -ArgumentList \"run\",\"c:\\\\Users\\\\dhara\\\\OneDrive\\\\Desktop\\\\GENERATIVE_DESIGN_2D\\\\app.py\",\"--server.port\",\"8501\" -NoNewWindow -PassThru)",
+      "PowerShell(Start-Sleep -Seconds 5; try { $r = Invoke-WebRequest -Uri \"http://localhost:8501\" -TimeoutSec 5 -UseBasicParsing; \"HTTP $\\($r.StatusCode\\) — Streamlit is up\" } catch { \"Not ready: $\\($_.Exception.Message\\)\" })",
+      "PowerShell(git add -A)",
+      "PowerShell(git push -u origin feat/zone-area-matching)",
+      "PowerShell(git fetch origin)",
+      "PowerShell(git ls-tree --name-only -r origin/feat/zone-area-matching)",
+      "PowerShell(git reset --soft origin/feat/zone-area-matching)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\dhara\\OneDrive\\Desktop\\GENERATIVE_DESIGN_2D\\.venv"
+    ]
+  }
+}

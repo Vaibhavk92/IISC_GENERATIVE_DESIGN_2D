@@ -1,0 +1,66 @@
+{
+  "piece_id": "scrap_database_scrap_4",
+  "rotation_degrees": 180,
+  "position_dx": 219.256,
+  "position_dy": 200.992,
+  "covered_area_world": 8234.834,
+  "covered_area_cm2": 9.1498,
+  "waste_area_world": 1276.0,
+  "waste_area_cm2": 1.4178,
+  "num_cuts": 3,
+  "total_cut_length_world": 127.813,
+  "total_cut_length_cm": 4.2604,
+  "cuts": [
+    {
+      "cut_index": 0,
+      "length_world": 83.4201,
+      "length_cm": 2.7807,
+      "is_straight": true,
+      "num_vertices": 2,
+      "coordinates_world": [
+        [
+          429.007,
+          292.295
+        ],
+        [
+          429.218,
+          208.875
+        ]
+      ]
+    },
+    {
+      "cut_index": 1,
+      "length_world": 24.1734,
+      "length_cm": 0.8058,
+      "is_straight": true,
+      "num_vertices": 2,
+      "coordinates_world": [
+        [
+          418.713,
+          180.311
+        ],
+        [
+          394.542,
+          179.972
+        ]
+      ]
+    },
+    {
+      "cut_index": 2,
+      "length_world": 20.2197,
+      "length_cm": 0.674,
+      "is_straight": true,
+      "num_vertices": 2,
+      "coordinates_world": [
+        [
+          327.171,
+          274.748
+        ],
+        [
+          327.644,
+          294.962
+        ]
+      ]
+    }
+  ]
+}

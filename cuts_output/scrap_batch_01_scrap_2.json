@@ -1,0 +1,134 @@
+{
+  "piece_id": "scrap_batch_01_scrap_2",
+  "rotation_degrees": 270,
+  "position_dx": 33.773,
+  "position_dy": 187.111,
+  "covered_area_world": 1187.636,
+  "covered_area_cm2": 1.3196,
+  "waste_area_world": 3087.222,
+  "waste_area_cm2": 3.4302,
+  "num_cuts": 3,
+  "total_cut_length_world": 115.402,
+  "total_cut_length_cm": 3.8467,
+  "cuts": [
+    {
+      "cut_index": 0,
+      "length_world": 28.5428,
+      "length_cm": 0.9514,
+      "is_straight": false,
+      "num_vertices": 3,
+      "coordinates_world": [
+        [
+          336.706,
+          296.133
+        ],
+        [
+          336.706,
+          296.133
+        ],
+        [
+          348.957,
+          321.912
+        ]
+      ]
+    },
+    {
+      "cut_index": 1,
+      "length_world": 61.6673,
+      "length_cm": 2.0556,
+      "is_straight": false,
+      "num_vertices": 8,
+      "coordinates_world": [
+        [
+          358.262,
+          321.588
+        ],
+        [
+          381.371,
+          311.529
+        ],
+        [
+          381.371,
+          311.529
+        ],
+        [
+          381.371,
+          311.529
+        ],
+        [
+          389.017,
+          291.869
+        ],
+        [
+          389.017,
+          291.869
+        ],
+        [
+          389.017,
+          291.869
+        ],
+        [
+          374.215,
+          287.733
+        ]
+      ]
+    },
+    {
+      "cut_index": 2,
+      "length_world": 25.1921,
+      "length_cm": 0.8397,
+      "is_straight": false,
+      "num_vertices": 12,
+      "coordinates_world": [
+        [
+          360.138,
+          288.578
+        ],
+        [
+          358.951,
+          290.477
+        ],
+        [
+          358.951,
+          290.477
+        ],
+        [
+          358.951,
+          290.477
+        ],
+        [
+          358.951,
+          290.477
+        ],
+        [
+          358.951,
+          290.477
+        ],
+        [
+          358.951,
+          290.477
+        ],
+        [
+          358.951,
+          290.477
+        ],
+        [
+          358.951,
+          290.477
+        ],
+        [
+          358.951,
+          290.477
+        ],
+        [
+          336.706,
+          296.133
+        ],
+        [
+          336.706,
+          296.133
+        ]
+      ]
+    }
+  ]
+}
