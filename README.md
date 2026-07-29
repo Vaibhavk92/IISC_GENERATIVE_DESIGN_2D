@@ -4,6 +4,12 @@
 
 Manufacturing units, workshops, and fabrication shops generate large volumes of offcuts and scrap material — plywood, sheet metal, acrylic, fabric — every day. Today, most of this material has **no productive use**: it is stockpiled, sold at scrap rates, or sent to landfill. The material itself is perfectly usable; what's missing is a fast, low-cost way to figure out *what can be built from the odd-shaped pieces at hand*.
 
+## Roadmap — From PoC to Industry Impact
+
+This 2D pipeline is the first iteration. The **next iteration extends the same idea to 3D**: fitting scrap stock to 3D part geometries, generating manufacturable prototypes directly from waste inventory.
+
+The target beneficiaries are **manufacturing companies and MSMEs**, where material cost is a major share of expenses and scrap utilisation is currently near zero. Even modest recovery of scrap into sellable prototypes and products translates into direct cost savings, new revenue from waste, and a measurable sustainability story — at a scale that matters for the MSME sector.
+
 ## What This Project Does
 
 This is a **proof of concept (PoC)** for a generative design pipeline that gives scrap material a second life. Instead of designing a product first and then buying fresh material for it, the pipeline works in reverse:
@@ -41,8 +47,4 @@ AI silhouette generation (SDXL) is optional and needs the extra packages listed 
 
 Scrap inventories live in `inventory_pieces/` and generated cutting plans in `cuts_output/`.
 
-## Roadmap — From PoC to Industry Impact
 
-This 2D pipeline is the first iteration. The **next iteration extends the same idea to 3D**: fitting scrap stock to 3D part geometries, generating manufacturable prototypes directly from waste inventory.
-
-The target beneficiaries are **manufacturing companies and MSMEs**, where material cost is a major share of expenses and scrap utilisation is currently near zero. Even modest recovery of scrap into sellable prototypes and products translates into direct cost savings, new revenue from waste, and a measurable sustainability story — at a scale that matters for the MSME sector.
